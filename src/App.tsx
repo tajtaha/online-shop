@@ -19,13 +19,6 @@ type CartProduct = {
   quantity: number;
 };
 
-type Cart = {
-  id: number;
-  userId: number;
-  date: string;
-  products: CartProduct[];
-};
-
 type User = {
   id: number;
   username: string;
@@ -39,7 +32,7 @@ export default function App() {
   const [categories, setCategories] = useState<string[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [newUser, setNewUser] = useState<boolean>(true);
-  const [cart, setCart] = useState<Cart[]>([]);
+  const [cart, setCart] = useState<CartProduct[]>([]);
   const [userId, setUserId] = useState<number | null>(null);
 
   useEffect(() => {
@@ -74,11 +67,30 @@ export default function App() {
     return <p>Error: {error}</p>;
   }
 
+  function handleAddToCart(productId: number) {
+    setCart((currentCart) => {
+      const existingItem = currentCart.find(
+        (item) => item.productId === productId,
+      );
+
+      if (existingItem) {
+        return currentCart.map((item) =>
+          item.productId === productId
+            ? { ...item, quantity: item.quantity + 1 }
+            : item,
+        );
+      }
+
+      return [...currentCart, { productId, quantity: 1 }];
+    });
+  }
+
   return (
     <div>
       <ProductsList
         products={searchProducts ?? products}
         selectedCategory={selectedCategory}
+        onAddToCart={handleAddToCart}
       />
       <Login newUser={newUser} setNewUser={setNewUser} setUserId={setUserId} />
       <SearchBar products={products} setSearchProducts={setSearchProducts} />
@@ -86,7 +98,8 @@ export default function App() {
         categories={categories}
         setSelectedCategory={setSelectedCategory}
       />
-      <Cart userId={userId} setCart={setCart} cart={cart} products={products} />
+      <UserCart cart={cart} products={products} setCart={setCart} />
+      <AddNewProduct />
     </div>
   );
 }
@@ -94,9 +107,11 @@ export default function App() {
 function ProductsList({
   products,
   selectedCategory,
+  onAddToCart,
 }: {
   products: Product[];
   selectedCategory: string | null;
+  onAddToCart: (productId: number) => void;
 }) {
   const filteredProducts =
     selectedCategory === null || selectedCategory === "all"
@@ -118,6 +133,7 @@ function ProductsList({
           <p>
             Rating: {product.rating.rate} ({product.rating.count} reviews)
           </p>
+          <button onClick={() => onAddToCart(product.id)}>Add to Cart +</button>
         </article>
       ))}
     </div>
@@ -136,19 +152,51 @@ function Login({
   const [username, setUsername] = useState<string>("");
   const [password, setPassword] = useState<string>("");
   const [email, setEmail] = useState<string>("");
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
   async function postCredentials() {
-    const response = await fetch("https://fakestoreapi.com/users", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password, email }),
-    });
-    const data = await response.json();
-    console.log(data);
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      if (!username.trim() || !password.trim() || !email.trim()) {
+        throw new Error("Please fill in all fields.");
+      }
+
+      const response = await fetch("https://fakestoreapi.com/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password, email }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Registration failed: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log(data);
+
+      setSuccess("Registration request completed.");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function authenticateUser() {
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+
     try {
+      if (!username.trim() || !password) {
+        throw new Error("Enter your username and password.");
+      }
+
       const response = await fetch("https://fakestoreapi.com/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -156,26 +204,37 @@ function Login({
       });
 
       if (!response.ok) {
-        throw new Error("Login failed");
+        throw new Error("Login failed. Check your credentials.");
       }
+
+      const data: { token?: string } = await response.json();
+
+      if (typeof data.token !== "string" || data.token.trim() === "") {
+        throw new Error("The API did not return a valid token value.");
+      }
+
+      console.log("Token received successfully.");
 
       const usersResponse = await fetch("https://fakestoreapi.com/users");
 
       if (!usersResponse.ok) {
-        throw new Error("Could not fetch users");
+        throw new Error("Could not fetch users.");
       }
 
       const users: User[] = await usersResponse.json();
-      const user = users.find((user) => user.username === username);
+      const user = users.find((item) => item.username === username);
 
       if (!user) {
-        throw new Error("Could not find this user");
+        throw new Error("Could not find this demo user.");
       }
 
       setUserId(user.id);
       setNewUser(false);
-    } catch (err) {
-      console.error(err);
+      setSuccess("Login successful.");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -209,7 +268,12 @@ function Login({
         />
       )}
 
-      <button onClick={onLogin}>{newUser ? "Sign up" : "Log in"}</button>
+      <button onClick={onLogin} disabled={loading}>
+        {loading ? "Please wait..." : newUser ? "Sign up" : "Log in"}
+      </button>
+
+      {error && <p role="alert">{error}</p>}
+      {success && <p role="status">{success}</p>}
       <button onClick={() => setNewUser(!newUser)}>
         {newUser ? "Already have an account? Log in" : "New user? Sign up"}
       </button>
@@ -264,62 +328,125 @@ function SortProducts({
   );
 }
 
-function Cart({
-  userId,
-  setCart,
+function UserCart({
   cart,
   products,
+  setCart,
 }: {
-  userId: number | null;
-  setCart: Dispatch<SetStateAction<Cart[]>>;
-  cart: Cart[];
+  cart: CartProduct[];
   products: Product[];
+  setCart: Dispatch<SetStateAction<CartProduct[]>>;
 }) {
-  useEffect(() => {
-    if (userId === null) return;
+  function handleRemoveFromCart(productId: number) {
+    setCart((currentCart) =>
+      currentCart.filter((item) => item.productId !== productId),
+    );
+  }
+  return (
+    <div>
+      <h2>Your Cart</h2>
 
-    const URL = `https://fakestoreapi.com/carts/user/${userId}`;
+      {cart.length === 0 && <p>Your cart is empty.</p>}
 
-    async function fetchCart() {
-      try {
-        const response = await fetch(URL);
+      {cart.map((item) => {
+        const product = products.find(
+          (product) => product.id === item.productId,
+        );
 
-        if (!response.ok) {
-          throw new Error("Could not fetch cart");
-        }
+        if (!product) return null;
 
-        const data = await response.json();
-        console.log(data);
-        setCart(data);
-      } catch (err) {
-        console.error(err);
-      }
+        return (
+          <div key={item.productId}>
+            <img src={product.image} alt={product.title} width={80} />
+            <h3>{product.title}</h3>
+            <p>Price: ${product.price.toFixed(2)}</p>
+            <p>Quantity: {item.quantity}</p>
+            <p>Subtotal: ${(product.price * item.quantity).toFixed(2)}</p>
+            <button onClick={() => handleRemoveFromCart(product.id)}>
+              remove from cart
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function AddNewProduct() {
+  const [title, setTitle] = useState<string>("");
+  const [price, setPrice] = useState<string>("");
+  const [description, setDescription] = useState<string>("");
+  const [category, setCategory] = useState<string>("");
+  const [image, setImage] = useState<File | null>(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState<boolean>(false);
+
+  async function PostNewProduct() {
+    setLoading(true);
+    const numericPrice = Number(price);
+
+    if (!price.trim() || !Number.isFinite(numericPrice) || numericPrice <= 0) {
+      setError("Enter a valid price greater than zero.");
+      return;
     }
+    try {
+      const response = await fetch("https://fakestoreapi.com/products", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          price: Number(price),
+          description,
+          category,
+          image,
+        }),
+      });
 
-    fetchCart();
-  }, [userId]);
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log(data);
+    } catch (error: unknown) {
+      setError(error instanceof Error ? error.message : "Something went wrong");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
     <div>
-      {cart.map((cartEntry) => (
-        <div key={cartEntry.id}>
-          {cartEntry.products.map((item) => {
-            const product = products.find((p) => p.id === item.productId);
+      <input
+        onChange={(e) => setTitle(e.target.value)}
+        required
+        placeholder="Product Title: "
+      />
+      <input
+        onChange={(e) => setPrice(e.target.value)}
+        required
+        placeholder="Product Price"
+      />
+      <input
+        onChange={(e) => setDescription(e.target.value)}
+        placeholder="description"
+      />
+      <input
+        onChange={(e) => setCategory(e.target.value)}
+        placeholder="category"
+      />
+      <input
+        onChange={(e) => setImage(e.target.files?.[0] ?? null)}
+        type="file"
+        placeholder="Image"
+      />
 
-            if (!product) return null;
+      <p>{error}</p>
+      <p>{loading ? "loading" : ""}</p>
 
-            return (
-              <div key={item.productId}>
-                <img src={product.image} alt={product.title} width={80} />
-                <h3>{product.title}</h3>
-                <p>Price: ${product.price.toFixed(2)}</p>
-                <p>Quantity: {item.quantity}</p>
-                <p>Subtotal: ${(product.price * item.quantity).toFixed(2)}</p>
-              </div>
-            );
-          })}
-        </div>
-      ))}
+      <button disabled={loading} onClick={PostNewProduct}>
+        Add Product
+      </button>
     </div>
   );
 }
