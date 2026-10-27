@@ -19,21 +19,31 @@ type CartProduct = {
   quantity: number;
 };
 
+type UserCredentials = {
+  id: number;
+  username: string;
+};
+
 type User = {
   id: number;
   username: string;
+  email: string;
+  password: string;
 };
 
 export default function App() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [searchProducts, setSearchProducts] = useState<Product[] | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
   const [categories, setCategories] = useState<string[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [newUser, setNewUser] = useState<boolean>(true);
   const [cart, setCart] = useState<CartProduct[]>([]);
   const [userId, setUserId] = useState<number | null>(null);
+  const [userData, setUserData] = useState<User>();
+  const [sort, setSort] = useState<"desc" | "asc">("desc");
+  const [wishlist, setWishlist] = useState<Product[]>([]);
 
   useEffect(() => {
     const URL = "https://fakestoreapi.com/products";
@@ -85,57 +95,105 @@ export default function App() {
     });
   }
 
+  function handleAddToWishlist(productId: number) {
+    const product = products.find((item) => item.id === productId);
+
+    if (!product) return;
+
+    setWishlist((currentList) =>
+      currentList.some((item) => item.id === productId)
+        ? currentList.filter((item) => item.id !== productId)
+        : [...currentList, product],
+    );
+  }
+
+  const visibleProducts = products
+    .filter((product) => {
+      const matchesCategory =
+        selectedCategory === null ||
+        selectedCategory === "all" ||
+        product.category === selectedCategory;
+
+      const matchesSearch = product.title
+        .toLowerCase()
+        .includes(searchQuery.trim().toLowerCase());
+
+      return matchesCategory && matchesSearch;
+    })
+    .sort((a, b) => (sort === "asc" ? a.price - b.price : b.price - a.price));
+
   return (
     <div>
       <ProductsList
-        products={searchProducts ?? products}
-        selectedCategory={selectedCategory}
+        products={visibleProducts}
+        wishlist={wishlist}
         onAddToCart={handleAddToCart}
+        onAddToWishlist={handleAddToWishlist}
       />
-      <Login newUser={newUser} setNewUser={setNewUser} setUserId={setUserId} />
-      <SearchBar products={products} setSearchProducts={setSearchProducts} />
+
+      <SearchBar searchQuery={searchQuery} setSearchQuery={setSearchQuery} />
+
       <SortProducts
         categories={categories}
+        selectedCategory={selectedCategory}
         setSelectedCategory={setSelectedCategory}
+        sort={sort}
+        setSort={setSort}
       />
+      <Login newUser={newUser} setNewUser={setNewUser} setUserId={setUserId} />
       <UserCart cart={cart} products={products} setCart={setCart} />
       <AddNewProduct />
+      <Profile userId={userId} userData={userData} setUserData={setUserData} />
+      <Wishlist wishlist={wishlist} setWishlist={setWishlist} />
     </div>
   );
 }
 
 function ProductsList({
   products,
-  selectedCategory,
+  wishlist,
   onAddToCart,
+  onAddToWishlist,
 }: {
   products: Product[];
-  selectedCategory: string | null;
+  wishlist: Product[];
   onAddToCart: (productId: number) => void;
+  onAddToWishlist: (productId: number) => void;
 }) {
-  const filteredProducts =
-    selectedCategory === null || selectedCategory === "all"
-      ? products
-      : products.filter((product) => product.category === selectedCategory);
-
-  if (filteredProducts.length === 0) {
+  if (products.length === 0) {
     return <p>No products found.</p>;
   }
 
   return (
     <div className="products">
-      {filteredProducts.map((product) => (
-        <article key={product.id} className="product">
-          <img src={product.image} alt={product.title} />
-          <h2>{product.title}</h2>
-          <p>{product.description}</p>
-          <p>${product.price.toFixed(2)}</p>
-          <p>
-            Rating: {product.rating.rate} ({product.rating.count} reviews)
-          </p>
-          <button onClick={() => onAddToCart(product.id)}>Add to Cart +</button>
-        </article>
-      ))}
+      {products.map((product) => {
+        const isWishlisted = wishlist.some((item) => item.id === product.id);
+
+        return (
+          <article key={product.id} className="product">
+            <img src={product.image} alt={product.title} />
+            <h2>{product.title}</h2>
+            <p>{product.description}</p>
+            <p>${product.price.toFixed(2)}</p>
+            <p>
+              Rating: {product.rating.rate} ({product.rating.count} reviews)
+            </p>
+
+            <button onClick={() => onAddToCart(product.id)}>
+              Add to Cart +
+            </button>
+
+            <button
+              onClick={() => onAddToWishlist(product.id)}
+              aria-label={
+                isWishlisted ? "Remove from wishlist" : "Add to wishlist"
+              }
+            >
+              {isWishlisted ? "★" : "☆"}
+            </button>
+          </article>
+        );
+      })}
     </div>
   );
 }
@@ -221,7 +279,7 @@ function Login({
         throw new Error("Could not fetch users.");
       }
 
-      const users: User[] = await usersResponse.json();
+      const users: UserCredentials[] = await usersResponse.json();
       const user = users.find((item) => item.username === username);
 
       if (!user) {
@@ -282,26 +340,18 @@ function Login({
 }
 
 function SearchBar({
-  products,
-  setSearchProducts,
+  searchQuery,
+  setSearchQuery,
 }: {
-  products: Product[];
-  setSearchProducts: Dispatch<SetStateAction<Product[] | null>>;
+  searchQuery: string;
+  setSearchQuery: Dispatch<SetStateAction<string>>;
 }) {
-  function handleSearch(query: string) {
-    setSearchProducts(
-      query.trim() === ""
-        ? null
-        : products.filter((product) =>
-            product.title.toLowerCase().includes(query.toLowerCase()),
-          ),
-    );
-  }
   return (
     <div>
       <input
         placeholder="Search products..."
-        onChange={(e) => handleSearch(e.target.value)}
+        value={searchQuery}
+        onChange={(e) => setSearchQuery(e.target.value)}
       />
     </div>
   );
@@ -309,21 +359,38 @@ function SearchBar({
 
 function SortProducts({
   categories,
+  selectedCategory,
   setSelectedCategory,
+  sort,
+  setSort,
 }: {
   categories: string[];
+  selectedCategory: string | null;
   setSelectedCategory: Dispatch<SetStateAction<string | null>>;
+  sort: "asc" | "desc";
+  setSort: Dispatch<SetStateAction<"asc" | "desc">>;
 }) {
   return (
     <div>
-      <select onChange={(e) => setSelectedCategory(e.target.value)}>
-        <option value={"all"}>All Categories</option>
+      <select
+        value={selectedCategory ?? "all"}
+        onChange={(e) => setSelectedCategory(e.target.value)}
+      >
+        <option value="all">All Categories</option>
         {categories.map((category) => (
           <option key={category} value={category}>
             {category}
           </option>
         ))}
       </select>
+
+      <button
+        onClick={() =>
+          setSort((current) => (current === "asc" ? "desc" : "asc"))
+        }
+      >
+        {sort === "asc" ? "Price: Low to High ↑" : "Price: High to Low ↓"}
+      </button>
     </div>
   );
 }
@@ -342,6 +409,33 @@ function UserCart({
       currentCart.filter((item) => item.productId !== productId),
     );
   }
+
+  function handleIncrease(productId: number) {
+    setCart((currentCart) =>
+      currentCart.map((item) =>
+        item.productId === productId
+          ? { ...item, quantity: item.quantity + 1 }
+          : item,
+      ),
+    );
+  }
+
+  function handleDecrease(productId: number) {
+    setCart((currentCart) =>
+      currentCart.map((item) =>
+        item.productId === productId && item.quantity > 1
+          ? { ...item, quantity: item.quantity - 1 }
+          : item,
+      ),
+    );
+  }
+
+  const totalPrice = cart.reduce((total, item) => {
+    const product = products.find((product) => product.id === item.productId);
+
+    return product ? total + product.price * item.quantity : total;
+  }, 0);
+
   return (
     <div>
       <h2>Your Cart</h2>
@@ -362,12 +456,19 @@ function UserCart({
             <p>Price: ${product.price.toFixed(2)}</p>
             <p>Quantity: {item.quantity}</p>
             <p>Subtotal: ${(product.price * item.quantity).toFixed(2)}</p>
-            <button onClick={() => handleRemoveFromCart(product.id)}>
-              remove from cart
+
+            <button onClick={() => handleDecrease(item.productId)}>-</button>
+            <button onClick={() => handleIncrease(item.productId)}>+</button>
+            <button onClick={() => handleRemoveFromCart(item.productId)}>
+              Remove
             </button>
           </div>
         );
       })}
+
+      <h3>Total: ${totalPrice.toFixed(2)}</h3>
+      <h3>{products.length} Products</h3>
+      <button onClick={() => setCart([])}>Clear Cart</button>
     </div>
   );
 }
@@ -377,18 +478,18 @@ function AddNewProduct() {
   const [price, setPrice] = useState<string>("");
   const [description, setDescription] = useState<string>("");
   const [category, setCategory] = useState<string>("");
-  const [image, setImage] = useState<File | null>(null);
+  const [image, setImage] = useState<string>("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState<boolean>(false);
 
   async function PostNewProduct() {
-    setLoading(true);
     const numericPrice = Number(price);
 
     if (!price.trim() || !Number.isFinite(numericPrice) || numericPrice <= 0) {
       setError("Enter a valid price greater than zero.");
       return;
     }
+    setLoading(true);
     try {
       const response = await fetch("https://fakestoreapi.com/products", {
         method: "POST",
@@ -436,7 +537,7 @@ function AddNewProduct() {
         placeholder="category"
       />
       <input
-        onChange={(e) => setImage(e.target.files?.[0] ?? null)}
+        onChange={(e) => setImage(e.target.value)}
         type="file"
         placeholder="Image"
       />
@@ -448,5 +549,94 @@ function AddNewProduct() {
         Add Product
       </button>
     </div>
+  );
+}
+
+function Profile({
+  userId,
+  userData,
+  setUserData,
+}: {
+  userId: number | null;
+  userData: User | undefined;
+  setUserData: Dispatch<SetStateAction<User | undefined>>;
+}) {
+  useEffect(() => {
+    if (userId === null) {
+      setUserData(undefined);
+      return;
+    }
+
+    async function getSingleUser() {
+      try {
+        const response = await fetch(
+          `https://fakestoreapi.com/users/${userId}`,
+        );
+
+        if (!response.ok) {
+          throw new Error(`HTTP error: ${response.status}`);
+        }
+
+        const data: User = await response.json();
+        setUserData(data);
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    getSingleUser();
+  }, [userId, setUserData]);
+
+  if (!userData) {
+    return <p>No user loaded.</p>;
+  }
+
+  return (
+    <div>
+      <h2>Profile</h2>
+      <p>Username: {userData.username}</p>
+      <p>Email: {userData.email}</p>
+    </div>
+  );
+}
+
+function Wishlist({
+  wishlist,
+  setWishlist,
+}: {
+  wishlist: Product[];
+  setWishlist: Dispatch<SetStateAction<Product[]>>;
+}) {
+  if (wishlist.length === 0) {
+    return (
+      <section>
+        <h2>Wishlist</h2>
+        <p>Your wishlist is empty.</p>
+      </section>
+    );
+  }
+
+  return (
+    <section>
+      <h2>Wishlist ({wishlist.length})</h2>
+
+      {wishlist.map((item) => (
+        <article key={item.id}>
+          <img src={item.image} alt={item.title} width={80} />
+          <h3>{item.title}</h3>
+          <p>${item.price.toFixed(2)}</p>
+
+          <button
+            onClick={() =>
+              setWishlist((currentList) =>
+                currentList.filter((product) => product.id !== item.id),
+              )
+            }
+          >
+            Remove
+          </button>
+        </article>
+      ))}
+    </section>
   );
 }
