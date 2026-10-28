@@ -32,6 +32,22 @@ type User = {
 };
 
 export default function App() {
+  function getSavedData<T>(key: string, fallback: T): T {
+    try {
+      const saved = localStorage.getItem(key);
+      return saved ? (JSON.parse(saved) as T) : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  const [cart, setCart] = useState<CartProduct[]>(() =>
+    getSavedData<CartProduct[]>("cart", []),
+  );
+  const [wishlist, setWishlist] = useState<Product[]>(() =>
+    getSavedData<Product[]>("wishlist", []),
+  );
+
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -39,11 +55,9 @@ export default function App() {
   const [categories, setCategories] = useState<string[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [newUser, setNewUser] = useState<boolean>(true);
-  const [cart, setCart] = useState<CartProduct[]>([]);
   const [userId, setUserId] = useState<number | null>(null);
   const [userData, setUserData] = useState<User>();
   const [sort, setSort] = useState<"desc" | "asc">("desc");
-  const [wishlist, setWishlist] = useState<Product[]>([]);
 
   useEffect(() => {
     const URL = "https://fakestoreapi.com/products";
@@ -107,6 +121,12 @@ export default function App() {
     );
   }
 
+  function handleRemoveFromCart(productId: number) {
+    setCart((currentCart) =>
+      currentCart.filter((item) => item.productId !== productId),
+    );
+  }
+
   const visibleProducts = products
     .filter((product) => {
       const matchesCategory =
@@ -141,10 +161,24 @@ export default function App() {
         setSort={setSort}
       />
       <Login newUser={newUser} setNewUser={setNewUser} setUserId={setUserId} />
-      <UserCart cart={cart} products={products} setCart={setCart} />
-      <AddNewProduct />
+      <UserCart
+        cart={cart}
+        products={products}
+        setCart={setCart}
+        handleRemoveFromCart={handleRemoveFromCart}
+      />
+      <ProductsManagement products={products} />
       <Profile userId={userId} userData={userData} setUserData={setUserData} />
-      <Wishlist wishlist={wishlist} setWishlist={setWishlist} />
+      <Wishlist
+        wishlist={wishlist}
+        setWishlist={setWishlist}
+        handleAddToCart={handleAddToCart}
+      />
+      <Checkout
+        cart={cart}
+        handleRemoveFromCart={handleRemoveFromCart}
+        products={products}
+      />
     </div>
   );
 }
@@ -399,17 +433,13 @@ function UserCart({
   cart,
   products,
   setCart,
+  handleRemoveFromCart,
 }: {
   cart: CartProduct[];
   products: Product[];
   setCart: Dispatch<SetStateAction<CartProduct[]>>;
+  handleRemoveFromCart: (productId: number) => void;
 }) {
-  function handleRemoveFromCart(productId: number) {
-    setCart((currentCart) =>
-      currentCart.filter((item) => item.productId !== productId),
-    );
-  }
-
   function handleIncrease(productId: number) {
     setCart((currentCart) =>
       currentCart.map((item) =>
@@ -469,6 +499,126 @@ function UserCart({
       <h3>Total: ${totalPrice.toFixed(2)}</h3>
       <h3>{products.length} Products</h3>
       <button onClick={() => setCart([])}>Clear Cart</button>
+    </div>
+  );
+}
+
+function ProductsManagement({ products }: { products: Product[] }) {
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [title, setTitle] = useState("");
+  const [price, setPrice] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  function startEditing(product: Product) {
+    setEditingProduct(product);
+    setTitle(product.title);
+    setPrice(String(product.price));
+    setError("");
+  }
+
+  async function onEditProduct() {
+    if (!editingProduct) return;
+
+    const numericPrice = Number(price);
+
+    if (
+      !title.trim() ||
+      !price.trim() ||
+      !Number.isFinite(numericPrice) ||
+      numericPrice <= 0
+    ) {
+      setError("Enter a valid title and price.");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+
+    try {
+      const response = await fetch(
+        `https://fakestoreapi.com/products/${editingProduct.id}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: title.trim(),
+            price: numericPrice,
+            description: editingProduct.description,
+            category: editingProduct.category,
+            image: editingProduct.image,
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log(data);
+
+      setEditingProduct(null);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function onRemoveProduct(productId: number) {
+    fetch(`https://fakestoreapi.com/products/${productId}`, {
+      method: "DELETE",
+    })
+      .then((response) => response.json())
+      .then((data) => console.log(data));
+  }
+
+  return (
+    <div>
+      {products.map((item) => (
+        <div key={item.id}>
+          <h3>{item.title}</h3>
+          <p>{item.id}</p>
+          <p>${item.price.toFixed(2)}</p>
+
+          <button onClick={() => startEditing(item)}>Edit</button>
+          <button onClick={() => onRemoveProduct(item.id)}>Remove</button>
+        </div>
+      ))}
+
+      {editingProduct && (
+        <div>
+          <h3>Edit {editingProduct.title}</h3>
+
+          <input
+            value={title}
+            placeholder="Title..."
+            onChange={(e) => setTitle(e.target.value)}
+          />
+
+          <input
+            type="number"
+            min="0.01"
+            step="0.01"
+            value={price}
+            placeholder="Price..."
+            onChange={(e) => setPrice(e.target.value)}
+          />
+
+          {error && <p role="alert">{error}</p>}
+
+          <button onClick={onEditProduct} disabled={loading}>
+            {loading ? "Saving..." : "Save"}
+          </button>
+
+          <button onClick={() => setEditingProduct(null)} disabled={loading}>
+            Cancel
+          </button>
+        </div>
+      )}
+
+      <AddNewProduct />
     </div>
   );
 }
@@ -603,9 +753,11 @@ function Profile({
 function Wishlist({
   wishlist,
   setWishlist,
+  handleAddToCart,
 }: {
   wishlist: Product[];
   setWishlist: Dispatch<SetStateAction<Product[]>>;
+  handleAddToCart: (productId: number) => void;
 }) {
   if (wishlist.length === 0) {
     return (
@@ -625,6 +777,7 @@ function Wishlist({
           <img src={item.image} alt={item.title} width={80} />
           <h3>{item.title}</h3>
           <p>${item.price.toFixed(2)}</p>
+          <button onClick={() => handleAddToCart(item.id)}>Add to Cart</button>
 
           <button
             onClick={() =>
@@ -638,5 +791,174 @@ function Wishlist({
         </article>
       ))}
     </section>
+  );
+}
+
+function Checkout({
+  cart,
+  products,
+  handleRemoveFromCart,
+}: {
+  cart: CartProduct[];
+  handleRemoveFromCart: (productId: number) => void;
+  products: Product[];
+}) {
+  const totalPrice = cart.reduce((total, item) => {
+    const product = products.find((product) => product.id === item.productId);
+
+    return product ? total + product.price * item.quantity : total;
+  }, 0);
+
+  const cartCategories = cart.map((item) => {
+    const product = products.find((product) => product.id === item.productId);
+
+    return product?.category;
+  });
+
+  const recommendedProducts = products.filter(
+    (product) =>
+      cartCategories.includes(product.category) &&
+      !cart.some((item) => item.productId === product.id),
+  );
+
+  return (
+    <div>
+      {cart.map((item) => {
+        const product = products.find(
+          (product) => product.id === item.productId,
+        );
+
+        if (!product) return null;
+
+        return (
+          <div key={item.productId}>
+            <p>Product: {product.title}</p>
+            <p>Price: ${product.price.toFixed(2)}</p>
+            <p>Quantity: {item.quantity}</p>
+            <p>Subtotal: ${(product.price * item.quantity).toFixed(2)}</p>
+            <button onClick={() => handleRemoveFromCart(item.productId)}>
+              delete
+            </button>
+          </div>
+        );
+      })}
+
+      <p>{totalPrice}</p>
+
+      <Form />
+
+      <h2>You might also like</h2>
+
+      {recommendedProducts.map((product) => (
+        <div key={product.id}>
+          <img src={product.image} alt={product.title} width={80} />
+          <h3>{product.title}</h3>
+          <p>${product.price.toFixed(2)}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Form() {
+  return (
+    <div>
+      <form>
+        <h3>Contact Information</h3>
+
+        <label htmlFor="fullName">Full Name</label>
+        <input
+          id="fullName"
+          type="text"
+          placeholder="John Doe"
+          autoComplete="name"
+        />
+
+        <label htmlFor="email">Email Address</label>
+        <input
+          id="email"
+          type="email"
+          placeholder="john@example.com"
+          autoComplete="email"
+        />
+
+        <label htmlFor="phone">Phone Number</label>
+        <input
+          id="phone"
+          type="tel"
+          placeholder="+1 234 567 890"
+          autoComplete="tel"
+        />
+
+        <h3>Shipping Address</h3>
+
+        <label htmlFor="address">Street Address</label>
+        <input
+          id="address"
+          type="text"
+          placeholder="123 Main Street"
+          autoComplete="street-address"
+        />
+
+        <div className="checkout-row">
+          <div>
+            <label htmlFor="city">City</label>
+            <input
+              id="city"
+              type="text"
+              placeholder="New York"
+              autoComplete="address-level2"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="postalCode">Postal Code</label>
+            <input
+              id="postalCode"
+              type="text"
+              placeholder="10001"
+              autoComplete="postal-code"
+            />
+          </div>
+        </div>
+
+        <label htmlFor="country">Country</label>
+        <select id="country" defaultValue="">
+          <option value="" disabled>
+            Select your country
+          </option>
+          <option value="us">United States</option>
+          <option value="uk">United Kingdom</option>
+          <option value="de">Germany</option>
+          <option value="ir">Iran</option>
+        </select>
+
+        <h3>Delivery Method</h3>
+
+        <label className="checkout-option">
+          <input type="radio" name="delivery" defaultChecked />
+          Standard Delivery
+        </label>
+
+        <label className="checkout-option">
+          <input type="radio" name="delivery" />
+          Express Delivery
+        </label>
+
+        <h3>Payment Method</h3>
+
+        <label className="checkout-option">
+          <input type="radio" name="payment" defaultChecked />
+          Cash on Delivery
+        </label>
+
+        <label className="checkout-option">
+          <input type="radio" name="payment" />
+          Credit or Debit Card
+        </label>
+
+        <button type="button">Place Order</button>
+      </form>
+    </div>
   );
 }
