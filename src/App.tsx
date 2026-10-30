@@ -31,23 +31,12 @@ type User = {
   password: string;
 };
 
+type Tab = "home" | "management" | "cart" | "wishlists" | "profile";
+
 export default function App() {
-  function getSavedData<T>(key: string, fallback: T): T {
-    try {
-      const saved = localStorage.getItem(key);
-      return saved ? (JSON.parse(saved) as T) : fallback;
-    } catch {
-      return fallback;
-    }
-  }
-
-  const [cart, setCart] = useState<CartProduct[]>(() =>
-    getSavedData<CartProduct[]>("cart", []),
-  );
-  const [wishlist, setWishlist] = useState<Product[]>(() =>
-    getSavedData<Product[]>("wishlist", []),
-  );
-
+  const [cart, setCart] = useState<CartProduct[]>([]);
+  const [wishlist, setWishlist] = useState<Product[]>([]);
+  const [tab, setTab] = useState<Tab>("home");
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -144,41 +133,101 @@ export default function App() {
 
   return (
     <div>
-      <ProductsList
-        products={visibleProducts}
-        wishlist={wishlist}
-        onAddToCart={handleAddToCart}
-        onAddToWishlist={handleAddToWishlist}
-      />
+      <NavBar setTab={setTab} />
+      <main>
+        {tab === "home" && (
+          <>
+            <SearchBar
+              searchQuery={searchQuery}
+              setSearchQuery={setSearchQuery}
+            />
+            <SortProducts
+              categories={categories}
+              selectedCategory={selectedCategory}
+              setSelectedCategory={setSelectedCategory}
+              sort={sort}
+              setSort={setSort}
+            />
+            <ProductsList
+              products={visibleProducts}
+              wishlist={wishlist}
+              onAddToCart={handleAddToCart}
+              onAddToWishlist={handleAddToWishlist}
+            />
+          </>
+        )}
 
-      <SearchBar searchQuery={searchQuery} setSearchQuery={setSearchQuery} />
+        {tab === "management" && <Management products={products} />}
 
-      <SortProducts
-        categories={categories}
-        selectedCategory={selectedCategory}
-        setSelectedCategory={setSelectedCategory}
-        sort={sort}
-        setSort={setSort}
-      />
-      <Login newUser={newUser} setNewUser={setNewUser} setUserId={setUserId} />
-      <UserCart
-        cart={cart}
-        products={products}
-        setCart={setCart}
-        handleRemoveFromCart={handleRemoveFromCart}
-      />
-      <ProductsManagement products={products} />
-      <Profile userId={userId} userData={userData} setUserData={setUserData} />
-      <Wishlist
-        wishlist={wishlist}
-        setWishlist={setWishlist}
-        handleAddToCart={handleAddToCart}
-      />
-      <Checkout
-        cart={cart}
-        handleRemoveFromCart={handleRemoveFromCart}
-        products={products}
-      />
+        {tab === "cart" && (
+          <>
+            <UserCart
+              cart={cart}
+              products={products}
+              setCart={setCart}
+              handleRemoveFromCart={handleRemoveFromCart}
+            />
+            <Checkout
+              cart={cart}
+              handleRemoveFromCart={handleRemoveFromCart}
+              products={products}
+            />
+          </>
+        )}
+
+        {tab === "wishlists" && (
+          <Wishlist
+            wishlist={wishlist}
+            setWishlist={setWishlist}
+            handleAddToCart={handleAddToCart}
+          />
+        )}
+
+        {tab === "profile" && (
+          <>
+            <Login
+              newUser={newUser}
+              setNewUser={setNewUser}
+              setUserId={setUserId}
+            />
+            <Profile
+              userId={userId}
+              userData={userData}
+              setUserData={setUserData}
+            />
+          </>
+        )}
+      </main>
+    </div>
+  );
+}
+
+function NavBar({ setTab }: { setTab: Dispatch<SetStateAction<Tab>> }) {
+  return (
+    <div>
+      <Logo setTab={setTab} />
+      <Tabs setTab={setTab} />
+      <button onClick={() => setTab("profile")}>Profile</button>
+    </div>
+  );
+}
+
+function Logo({ setTab }: { setTab: Dispatch<SetStateAction<Tab>> }) {
+  return (
+    <div onClick={() => setTab("home")}>
+      <img src="./assets/logo.svg" />
+      <h1>Online Shop</h1>
+    </div>
+  );
+}
+
+function Tabs({ setTab }: { setTab: Dispatch<SetStateAction<Tab>> }) {
+  return (
+    <div>
+      <button onClick={() => setTab("home")}>Discover</button>
+      <button onClick={() => setTab("management")}>Management</button>
+      <button onClick={() => setTab("cart")}>Cart</button>
+      <button onClick={() => setTab("wishlists")}>Wishlists</button>
     </div>
   );
 }
@@ -503,67 +552,143 @@ function UserCart({
   );
 }
 
-function ProductsManagement({ products }: { products: Product[] }) {
-  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
-  const [title, setTitle] = useState("");
-  const [price, setPrice] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+function Management({ products }: { products: Product[] }) {
+  return (
+    <div>
+      <ProductsManagement products={products} />
+      <UserManagement />
+    </div>
+  );
+}
 
-  function startEditing(product: Product) {
-    setEditingProduct(product);
-    setTitle(product.title);
-    setPrice(String(product.price));
-    setError("");
-  }
+function UserManagement() {
+  const [users, setUsers] = useState<User[]>([]);
+  const [selectedUserId, setSelectedUserId] = useState<number | null>();
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
 
-  async function onEditProduct() {
-    if (!editingProduct) return;
+  useEffect(() => {
+    async function getUsers() {
+      try {
+        setLoading(true);
+        setError(null);
 
-    const numericPrice = Number(price);
+        const response = await fetch("https://fakestoreapi.com/users");
 
-    if (
-      !title.trim() ||
-      !price.trim() ||
-      !Number.isFinite(numericPrice) ||
-      numericPrice <= 0
-    ) {
-      setError("Enter a valid title and price.");
-      return;
+        if (!response.ok) {
+          throw new Error("Failed to fetch users.");
+        }
+
+        const data = await response.json();
+        setUsers(data);
+      } catch (error) {
+        setError(
+          error instanceof Error ? error.message : "Something went wrong.",
+        );
+      } finally {
+        setLoading(false);
+      }
     }
 
-    setLoading(true);
-    setError("");
+    getUsers();
+  }, []);
 
+  function handleUserRemove(userId: number) {
+    fetch(`https://fakestoreapi.com/users/${userId}`, {
+      method: "DELETE",
+    })
+      .then((response) => response.json())
+      .then((data) => console.log(data));
+    setUsers((prevUsers) => prevUsers.filter((user) => user.id !== userId));
+  }
+
+  if (loading) return <p>Loading users...</p>;
+  if (error) return <p>{error}</p>;
+  return (
+    <div>
+      {users.map((user) => (
+        <div>
+          <h2>{user.id}</h2>
+          <p>{user.username}</p>
+          <p>{user.password}</p>
+          <p>{user.email}</p>
+          <button onClick={() => setSelectedUserId(user.id)}>Edit</button>
+          <button onClick={() => handleUserRemove(user.id)}>Remove</button>
+        </div>
+      ))}
+      {selectedUserId && <EditUser userId={selectedUserId} />}
+    </div>
+  );
+}
+
+function EditUser({ userId }: { userId: number }) {
+  const [username, setUsername] = useState<string>("");
+  const [password, setPassword] = useState<string>("");
+  const [email, setEmail] = useState<string>("");
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
+
+  async function handleUserEdit() {
     try {
-      const response = await fetch(
-        `https://fakestoreapi.com/products/${editingProduct.id}`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            title: title.trim(),
-            price: numericPrice,
-            description: editingProduct.description,
-            category: editingProduct.category,
-            image: editingProduct.image,
-          }),
-        },
-      );
+      setLoading(true);
+      setError(null);
+
+      const user = {
+        username,
+        password,
+        email,
+      };
+
+      const response = await fetch(`https://fakestoreapi.com/users/${userId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(user),
+      });
 
       if (!response.ok) {
-        throw new Error(`Request failed: ${response.status}`);
+        throw new Error("Failed to update user.");
       }
 
       const data = await response.json();
       console.log(data);
-
-      setEditingProduct(null);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
+    } catch (error) {
+      setError(
+        error instanceof Error ? error.message : "Something went wrong.",
+      );
     } finally {
       setLoading(false);
     }
+  }
+
+  return (
+    <div>
+      <input
+        placeholder="Enter username"
+        onChange={(e) => setUsername(e.target.value)}
+      />
+      <input
+        placeholder="Enter password"
+        onChange={(e) => setPassword(e.target.value)}
+      />
+      <input
+        placeholder="Enter email"
+        onChange={(e) => setEmail(e.target.value)}
+      />
+      {error && <p>{error}</p>}
+
+      <button onClick={handleUserEdit} disabled={loading}>
+        {loading ? "Saving..." : "Save"}
+      </button>
+      <button>Cancel</button>
+    </div>
+  );
+}
+
+function ProductsManagement({ products }: { products: Product[] }) {
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+
+  function startEditing(product: Product) {
+    setEditingProduct(product);
   }
 
   function onRemoveProduct(productId: number) {
@@ -588,37 +713,104 @@ function ProductsManagement({ products }: { products: Product[] }) {
       ))}
 
       {editingProduct && (
-        <div>
-          <h3>Edit {editingProduct.title}</h3>
-
-          <input
-            value={title}
-            placeholder="Title..."
-            onChange={(e) => setTitle(e.target.value)}
-          />
-
-          <input
-            type="number"
-            min="0.01"
-            step="0.01"
-            value={price}
-            placeholder="Price..."
-            onChange={(e) => setPrice(e.target.value)}
-          />
-
-          {error && <p role="alert">{error}</p>}
-
-          <button onClick={onEditProduct} disabled={loading}>
-            {loading ? "Saving..." : "Save"}
-          </button>
-
-          <button onClick={() => setEditingProduct(null)} disabled={loading}>
-            Cancel
-          </button>
-        </div>
+        <EditProduct
+          key={editingProduct.id}
+          product={editingProduct}
+          onCancel={() => setEditingProduct(null)}
+        />
       )}
 
       <AddNewProduct />
+    </div>
+  );
+}
+
+function EditProduct({
+  product,
+  onCancel,
+}: {
+  product: Product;
+  onCancel: () => void;
+}) {
+  const [title, setTitle] = useState(product.title);
+  const [price, setPrice] = useState(String(product.price));
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  async function onEditProduct() {
+    const numericPrice = Number(price);
+
+    if (
+      !title.trim() ||
+      !price.trim() ||
+      !Number.isFinite(numericPrice) ||
+      numericPrice <= 0
+    ) {
+      setError("Enter a valid title and price.");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+
+    try {
+      const response = await fetch(
+        `https://fakestoreapi.com/products/${product.id}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: title.trim(),
+            price: numericPrice,
+            description: product.description,
+            category: product.category,
+            image: product.image,
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log(data);
+      onCancel();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div>
+      <h3>Edit {product.title}</h3>
+
+      <input
+        value={title}
+        placeholder="Title..."
+        onChange={(e) => setTitle(e.target.value)}
+      />
+
+      <input
+        type="number"
+        min="0.01"
+        step="0.01"
+        value={price}
+        placeholder="Price..."
+        onChange={(e) => setPrice(e.target.value)}
+      />
+
+      {error && <p role="alert">{error}</p>}
+
+      <button onClick={onEditProduct} disabled={loading}>
+        {loading ? "Saving..." : "Save"}
+      </button>
+
+      <button onClick={onCancel} disabled={loading}>
+        Cancel
+      </button>
     </div>
   );
 }
