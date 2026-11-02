@@ -151,8 +151,11 @@ export default function App() {
             <ProductsList
               products={visibleProducts}
               wishlist={wishlist}
+              cart={cart}
+              setCart={setCart}
               onAddToCart={handleAddToCart}
               onAddToWishlist={handleAddToWishlist}
+              removeFromCart={handleRemoveFromCart}
             />
           </>
         )}
@@ -179,7 +182,10 @@ export default function App() {
           <Wishlist
             wishlist={wishlist}
             setWishlist={setWishlist}
+            cart={cart}
+            setCart={setCart}
             handleAddToCart={handleAddToCart}
+            removeFromCart={handleRemoveFromCart}
           />
         )}
 
@@ -235,13 +241,19 @@ function Tabs({ setTab }: { setTab: Dispatch<SetStateAction<Tab>> }) {
 function ProductsList({
   products,
   wishlist,
+  cart,
+  setCart,
   onAddToCart,
   onAddToWishlist,
+  removeFromCart,
 }: {
   products: Product[];
   wishlist: Product[];
+  cart: CartProduct[];
+  setCart: Dispatch<SetStateAction<CartProduct[]>>;
   onAddToCart: (productId: number) => void;
   onAddToWishlist: (productId: number) => void;
+  removeFromCart: (productId: number) => void;
 }) {
   if (products.length === 0) {
     return <p>No products found.</p>;
@@ -251,6 +263,7 @@ function ProductsList({
     <div className="products">
       {products.map((product) => {
         const isWishlisted = wishlist.some((item) => item.id === product.id);
+        const cartItem = cart.find((item) => item.productId === product.id);
 
         return (
           <article key={product.id} className="product">
@@ -262,9 +275,18 @@ function ProductsList({
               Rating: {product.rating.rate} ({product.rating.count} reviews)
             </p>
 
-            <button onClick={() => onAddToCart(product.id)}>
-              Add to Cart +
-            </button>
+            {cartItem ? (
+              <QuantityControl
+                quantity={cartItem.quantity}
+                productId={product.id}
+                setCart={setCart}
+                removeFromCart={removeFromCart}
+              />
+            ) : (
+              <button onClick={() => onAddToCart(product.id)}>
+                Add to Cart +
+              </button>
+            )}
 
             <button
               onClick={() => onAddToWishlist(product.id)}
@@ -435,6 +457,7 @@ function SearchBar({
         placeholder="Search products..."
         value={searchQuery}
         onChange={(e) => setSearchQuery(e.target.value)}
+        type="search"
       />
     </div>
   );
@@ -489,26 +512,6 @@ function UserCart({
   setCart: Dispatch<SetStateAction<CartProduct[]>>;
   handleRemoveFromCart: (productId: number) => void;
 }) {
-  function handleIncrease(productId: number) {
-    setCart((currentCart) =>
-      currentCart.map((item) =>
-        item.productId === productId
-          ? { ...item, quantity: item.quantity + 1 }
-          : item,
-      ),
-    );
-  }
-
-  function handleDecrease(productId: number) {
-    setCart((currentCart) =>
-      currentCart.map((item) =>
-        item.productId === productId && item.quantity > 1
-          ? { ...item, quantity: item.quantity - 1 }
-          : item,
-      ),
-    );
-  }
-
   const totalPrice = cart.reduce((total, item) => {
     const product = products.find((product) => product.id === item.productId);
 
@@ -533,11 +536,14 @@ function UserCart({
             <img src={product.image} alt={product.title} width={80} />
             <h3>{product.title}</h3>
             <p>Price: ${product.price.toFixed(2)}</p>
-            <p>Quantity: {item.quantity}</p>
+            <QuantityControl
+              quantity={item.quantity}
+              productId={item.productId}
+              setCart={setCart}
+              removeFromCart={handleRemoveFromCart}
+            />
             <p>Subtotal: ${(product.price * item.quantity).toFixed(2)}</p>
 
-            <button onClick={() => handleDecrease(item.productId)}>-</button>
-            <button onClick={() => handleIncrease(item.productId)}>+</button>
             <button onClick={() => handleRemoveFromCart(item.productId)}>
               Remove
             </button>
@@ -546,17 +552,80 @@ function UserCart({
       })}
 
       <h3>Total: ${totalPrice.toFixed(2)}</h3>
-      <h3>{products.length} Products</h3>
+      <h3>{cart.length} Products</h3>
       <button onClick={() => setCart([])}>Clear Cart</button>
     </div>
   );
 }
 
 function Management({ products }: { products: Product[] }) {
+  const [tab, setTab] = useState<"products" | "users">("products");
   return (
     <div>
-      <ProductsManagement products={products} />
-      <UserManagement />
+      <MangementTabs setTab={setTab} />
+      {tab === "products" && <ProductsManagement products={products} />}
+      {tab === "users" && <UserManagement />}
+    </div>
+  );
+}
+
+function MangementTabs({
+  setTab,
+}: {
+  setTab: Dispatch<SetStateAction<"products" | "users">>;
+}) {
+  return (
+    <div>
+      <button onClick={() => setTab("products")}>Products</button>
+      <button onClick={() => setTab("users")}>Users</button>
+    </div>
+  );
+}
+
+function QuantityControl({
+  quantity,
+  productId,
+  setCart,
+  removeFromCart,
+}: {
+  quantity: number;
+  productId: number;
+  setCart: Dispatch<SetStateAction<CartProduct[]>>;
+  removeFromCart: (productId: number) => void;
+}) {
+  function handleIncrease() {
+    setCart((currentCart) =>
+      currentCart.map((item) =>
+        item.productId === productId
+          ? { ...item, quantity: item.quantity + 1 }
+          : item,
+      ),
+    );
+  }
+
+  function handleDecrease() {
+    if (quantity === 1) {
+      removeFromCart(productId);
+    } else {
+      setCart((currentCart) =>
+        currentCart.map((item) =>
+          item.productId === productId && item.quantity > 1
+            ? { ...item, quantity: item.quantity - 1 }
+            : item,
+        ),
+      );
+    }
+  }
+
+  return (
+    <div className="quantity-control">
+      <button onClick={handleDecrease} aria-label="Decrease quantity">
+        {quantity === 1 ? "🗑️" : "-"}
+      </button>
+      <span aria-live="polite">{quantity}</span>
+      <button onClick={handleIncrease} aria-label="Increase quantity">
+        +
+      </button>
     </div>
   );
 }
@@ -607,7 +676,7 @@ function UserManagement() {
   return (
     <div>
       {users.map((user) => (
-        <div>
+        <div key={user.id}>
           <h2>{user.id}</h2>
           <p>{user.username}</p>
           <p>{user.password}</p>
@@ -946,10 +1015,16 @@ function Wishlist({
   wishlist,
   setWishlist,
   handleAddToCart,
+  cart,
+  setCart,
+  removeFromCart,
 }: {
   wishlist: Product[];
   setWishlist: Dispatch<SetStateAction<Product[]>>;
   handleAddToCart: (productId: number) => void;
+  cart: CartProduct[];
+  setCart: Dispatch<SetStateAction<CartProduct[]>>;
+  removeFromCart: (productId: number) => void;
 }) {
   if (wishlist.length === 0) {
     return (
@@ -964,24 +1039,38 @@ function Wishlist({
     <section>
       <h2>Wishlist ({wishlist.length})</h2>
 
-      {wishlist.map((item) => (
-        <article key={item.id}>
-          <img src={item.image} alt={item.title} width={80} />
-          <h3>{item.title}</h3>
-          <p>${item.price.toFixed(2)}</p>
-          <button onClick={() => handleAddToCart(item.id)}>Add to Cart</button>
+      {wishlist.map((item) => {
+        const cartItem = cart.find((product) => product.productId === item.id);
+        return (
+          <article key={item.id}>
+            <img src={item.image} alt={item.title} width={80} />
+            <h3>{item.title}</h3>
+            <p>${item.price.toFixed(2)}</p>
+            {cartItem ? (
+              <QuantityControl
+                quantity={cartItem.quantity}
+                productId={item.id}
+                setCart={setCart}
+                removeFromCart={removeFromCart}
+              />
+            ) : (
+              <button onClick={() => handleAddToCart(item.id)}>
+                Add to Cart +
+              </button>
+            )}
 
-          <button
-            onClick={() =>
-              setWishlist((currentList) =>
-                currentList.filter((product) => product.id !== item.id),
-              )
-            }
-          >
-            Remove
-          </button>
-        </article>
-      ))}
+            <button
+              onClick={() =>
+                setWishlist((currentList) =>
+                  currentList.filter((product) => product.id !== item.id),
+                )
+              }
+            >
+              Remove
+            </button>
+          </article>
+        );
+      })}
     </section>
   );
 }
